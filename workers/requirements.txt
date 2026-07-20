@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+celery
+redis
+pymongo
+playwright
+beautifulsoup4
+yt-dlp
+anthropic
+elevenlabs
+httpx
+pdfplumber
+pytesseract
+pdf2image
+google-generativeai
+groq
+python-multipart

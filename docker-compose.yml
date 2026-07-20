@@ -1,0 +1,136 @@
+version: '3.9'
+
+services:
+  # ── FRONTEND PWA ──────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3800:3800"
+    environment:
+      - VITE_API_URL=http://localhost:4800
+      - VITE_WS_URL=ws://localhost:4800
+    command: sh -c "npm install tailwindcss@3.4.17 && npm run dev"
+    depends_on:
+      - api
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+  # ── API NESTJS ─────────────────────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    command: npm run start:dev
+    ports:
+      - "4800:4800"
+    environment:
+      - NODE_ENV=development
+      - PORT=4800
+      - MONGODB_URI=mongodb://mongo:27017/study-system
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=7d
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - PYTHON_WORKER_URL=http://workers:8800
+    depends_on:
+      - mongo
+      - redis
+    volumes:
+      - ./api:/app
+      - /app/node_modules
+      - ./shared:/shared
+
+  # ── PYTHON WORKERS ─────────────────────────────
+  workers:
+    build:
+      context: ./workers
+      dockerfile: Dockerfile
+    image: study-workers:latest
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8800
+    ports:
+      - "8800:8800"
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/study-system
+      - REDIS_URL=redis://redis:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - API_CALLBACK_URL=http://api:4800
+    depends_on:
+      - mongo
+      - redis
+    volumes:
+      - ./workers:/app
+      - /app/__pycache__
+      - ./shared:/shared
+
+  # ── CELERY WORKER (processamento assíncrono) ───
+  celery:
+    image: study-workers:latest
+    command: celery -A celery_app worker --loglevel=info --concurrency=1
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/study-system
+      - REDIS_URL=redis://redis:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - API_CALLBACK_URL=http://api:4800
+    depends_on:
+      - workers
+      - mongo
+      - redis
+    volumes:
+      - ./workers:/app
+      - ./shared:/shared
+
+  # ── CELERY BEAT (agendamento de tarefas) ───────
+  celery-beat:
+    image: study-workers:latest
+    command: celery -A celery_app beat --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - MONGODB_URI=mongodb://mongo:27017/study-system
+    depends_on:
+      - workers
+      - redis
+    volumes:
+      - ./workers:/app
+
+  # ── MONGODB ─────────────────────────────────────
+  mongo:
+    image: mongo:7.0
+    ports:
+      - "28018:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=study-system
+
+  # ── REDIS (fila + cache) ────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6878:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  # ── MONGO EXPRESS (admin UI) ─────────────────────
+  mongo-express:
+    image: mongo-express:latest
+    ports:
+      - "8888:8081"
+    environment:
+      - ME_CONFIG_MONGODB_URL=mongodb://mongo:27017/
+    depends_on:
+      - mongo
+
+volumes:
+  mongo_data:
+  redis_data:
